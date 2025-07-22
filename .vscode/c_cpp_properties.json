@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/home/studentas/Documents/Projects/rpi_linux/linux-6.14/include",
+                "/home/studentas/Documents/Projects/rpi_linux/linux-6.14/arch/arm/include",
+                "/home/studentas/Documents/Projects/rpi_linux/linux-6.14/arch/arm/include/generated"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
