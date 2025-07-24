@@ -1,0 +1,1 @@
+savedcmd_Module.symvers :=  /home/studentas/Documents/Projects/rpi_linux/linux-6.14/scripts/mod/modpost -M          -o Module.symvers -T modules.order -i /home/studentas/Documents/Projects/rpi_linux/linux-6.14/Module.symvers -e 

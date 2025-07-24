@@ -254,81 +254,59 @@ static int gpio_expander_write_byte( struct i2c_client *client, u8 byte){
 }
 
 static int get_busy_flag (struct i2c_client *client, int *busy_flag){
-    // To use an expanded GPIO of PCF8574 as input one needs to pull (weak) the pin high
-    // and check if it's pulled down (strong)
-
-    // Seems like when we're reading we use enable not to write a command to start reading
-    // but rather to flip to the next data, that is after hitting e, we're provided with
-    // next set of 4 bit data
-
-    //Pull up with Enable high
-    int ret;
-    ret = i2c_smbus_write_byte(client, 0xFE);
-    if (ret != 0){
-        pr_alert("%s: Failed to write to %s over I2C: %d\n", DRIVER_NAME, DEVICE_NAME, ret);
-        return ret;
-    }
-
-    // Read this first 4 bits (MSB side)
-
-    s32 read_data;
-    u8 high_side = 0;
-    u8 low_side = 0;
-
-    read_data = i2c_smbus_read_byte(client);
-    if (read_data < 0){
-        pr_alert("%s: Failed to read from %s over I2C: %d\n", DRIVER_NAME, DEVICE_NAME, read_data);
-        return ret;
-    }    
-    high_side = (u8) read_data;
-
-    // Toggle the enable to flip the data
-    ret = i2c_smbus_write_byte(client, 0xFA);
-    if (ret != 0){
-        pr_alert("%s: Failed to write to %s over I2C: %d\n", DRIVER_NAME, DEVICE_NAME, ret);
-        return ret;
-    }
-
-    ret = i2c_smbus_write_byte(client, 0xFE);
-    if (ret != 0){
-        pr_alert("%s: Failed to write to %s over I2C: %d\n", DRIVER_NAME, DEVICE_NAME, ret);
-        return ret;
-    }
-
-    // Read this last 4 bits (LSB side)
-
-    read_data = i2c_smbus_read_byte(client);
-    if (read_data < 0){
-        pr_alert("%s: Failed to read from %s over I2C: %d\n", DRIVER_NAME, DEVICE_NAME, read_data);
-        return ret;
-    }    
-    low_side = (u8) read_data;
-
-    // Connect the data
-
-    u8 full_data_byte = 0;
-    full_data_byte = (high_side << 4) | low_side;
-    pr_info("%s: Read from %s and received: %d\n", DRIVER_NAME, DEVICE_NAME, full_data_byte);
     
-    *busy_flag = full_data_byte & 0x80;
+    // 1. Set 4 data pins to high so that the LCD could pull them down if needed.
+    //    Set RW and E to 0 and then pull it up
 
-    //Toggle to finish the reading operation
-    // ret = i2c_smbus_write_byte(client, 0xFA);
-    // if (ret != 0){
-    //     pr_alert("%s: Failed to write to %s over I2C: %d\n", DRIVER_NAME, DEVICE_NAME, ret);
-    //     return ret;
-    // }
+    int ret = gpio_expander_write_byte(client, 0xFA);
+    if(ret != 0)
+        return ret;
 
-    // ret = i2c_smbus_write_byte(client, 0xFE);
-    // if (ret != 0){
-    //     pr_alert("%s: Failed to write to %s over I2C: %d\n", DRIVER_NAME, DEVICE_NAME, ret);
-    //     return ret;
-    // }
+    ret = gpio_expander_write_byte(client, 0xFE);
+    if(ret != 0)
+        return ret;
+
+    // 2. Now the data of the first nibble (higher part) should appear on the data pins.
+    //    Therefore we read it.
+
+    s32 nibble;
+    u8 full_response = 0;
+
+    nibble = i2c_smbus_read_byte(client);
+    if(nibble < 0)
+        return nibble;
+    
+    full_response |= ((u8)nibble & 0xF0);
+
+    // 3. Now to get the next nible we need to toggle the Enable
+
+    ret = gpio_expander_write_byte(client, 0xFA);
+    if(ret != 0)
+        return ret;
+    
+    ret = gpio_expander_write_byte(client, 0xFE);
+    if(ret != 0)
+        return ret; 
+        
+    // 4. Proceed to read the second nible (lower part)
+
+    nibble = i2c_smbus_read_byte(client);
+    if(nibble < 0)
+        return nibble;
+    
+    full_response |= ((u8)nibble & 0xF0) >> 4;
+    *busy_flag = (full_response & (0x80)) >> 7;
+    pr_alert("%s: Read %s's busy flag: %d. Full read: %d.\n", DRIVER_NAME, DEVICE_NAME,*busy_flag, full_response);
 
     return 0;
+
+    // // 5. Pull the enable back to low level
+
+    ret = gpio_expander_write_byte(client, 0xFA);
+    if(ret != 0)
+        return ret;
+
 }
-
-
 
 static int lcd_write_4bit_command(struct i2c_client *client, u8 command){
     int busy_flag = 1;
@@ -362,12 +340,24 @@ static int lcd_write_4bit_command(struct i2c_client *client, u8 command){
     ret = gpio_expander_write_byte(client, gpio_sequence);
     if(ret != 0)
         return ret;
+
     
     return 0;
 }
 
 static int lcd_write_4bit_data(struct i2c_client *client, u8 command){
     // First 4 DATA, 0xC for keeping the backlight and turning E high, then last two bits are R/W and RS
+
+    int busy_flag = 1;
+    while(busy_flag){
+        if(get_busy_flag(client, &busy_flag)!=0){
+            pr_alert("%s: Failed to get busy flag from %s.\n", DRIVER_NAME, DEVICE_NAME);
+            return -ENODEV;
+        }
+        if(busy_flag)
+            msleep(10);
+    }
+
     u8 gpio_sequence = (command & 0xF0) | 0xC | 0x1;
     int ret = gpio_expander_write_byte(client, gpio_sequence);
     if(ret != 0)
@@ -449,6 +439,5 @@ static int lcd_print_char(struct i2c_client *client, u8 symbol){
 }
 
 static int lcd_clear(struct i2c_client *client){
-    pr_info("%s: Clearing %s.\n", DRIVER_NAME, DEVICE_NAME);
     return lcd_write_4bit_command(client,0x01);
 }

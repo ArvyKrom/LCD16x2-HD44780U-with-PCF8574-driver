@@ -1,0 +1,1 @@
+savedcmd_i2c_lcd_driver.ko := arm-unknown-linux-gnueabi-ld -r -EL -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /home/studentas/Documents/Projects/rpi_linux/linux-6.14/scripts/module.lds -o i2c_lcd_driver.ko i2c_lcd_driver.o i2c_lcd_driver.mod.o .module-common.o
